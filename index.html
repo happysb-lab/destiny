@@ -558,6 +558,20 @@ function focusMarble() {
   return { focus, intensity: contested ? near(focus) : 0 };
 }
 
+let shot = null;
+function pickShot(live, ts) {
+  const i = Math.max(0, Math.min(live.length - 1, rankIdx - sim.finished.length));
+  const roll = Math.random();
+  let type, m, zoom;
+  if (live.length < 2 || roll < 0.25) { type = 'group'; }
+  else if (roll < 0.5) { type = 'leader'; m = live[0]; zoom = 2; }
+  else if (roll < 0.65) { type = 'target'; m = live[i]; zoom = 2.2; }
+  else if (roll < 0.8) { type = 'tail'; m = live[live.length - 1]; zoom = 2.4; }
+  else { type = 'random'; m = live[Math.floor(Math.random() * live.length)]; zoom = 2.8; }
+  if (m && shot && shot.m === m && live.length > 1) m = live[(live.indexOf(m) + 1) % live.length];
+  return { type, m, zoom, until: ts + 1500 + Math.random() * 1500 };
+}
+
 function loop(ts) {
   if (!last) last = ts;
   const f = focusMarble();
@@ -585,21 +599,32 @@ function loop(ts) {
 
   const bz = baseZoom();
   let tz = bz, tx = W / 2, ty = cam.y;
-  if (f) {
-    const live = liveRanked(sim);
-    tx = f.focus.x; ty = f.focus.y + (cv.height / bz) * 0.15;
+  if (f && f.intensity > 0) {
+    // finish duel: zoom hard onto the cutoff marble
+    tx = f.focus.x; ty = f.focus.y + (cv.height / bz) * 0.1;
     tz = bz * (1 + 3.5 * Math.pow(f.intensity, 0.7));
-    const spread = live.length ? live[0].y - live[live.length - 1].y : 0;
-    if (f.intensity === 0 && spread < cv.height / bz * 0.5) ty = (live[0].y + live[live.length - 1].y) / 2;
+    shot = null;
+  } else if (f) {
+    const live = liveRanked(sim);
+    // mid-race director: cut between shots every couple of seconds
+    if (!shot || ts > shot.until || (shot.m && shot.m.done)) shot = pickShot(live, ts);
+    const m = shot.m;
+    if (shot.type === 'group') {
+      const spread = live[0].y - live[live.length - 1].y;
+      tx = (live[0].x + live[live.length - 1].x) / 2; ty = (live[0].y + live[live.length - 1].y) / 2;
+      tz = Math.max(bz * 0.9, Math.min(bz * 1.4, cv.height / (spread + 10 * S)));
+    } else {
+      tx = m.x; ty = m.y + (cv.height / bz) * 0.1; tz = bz * shot.zoom;
+    }
     const cz = map.cameraZone;
-    if (f.intensity === 0 && cz && inZone(cz, f.focus)) {
+    if (cz && (shot.type === 'group' || shot.type === 'target') && inZone(cz, f.focus)) {
       tx = cz.x * S; ty = cz.y * S;
       tz = Math.min(cv.width / (cz.w * S), cv.height / (cz.h * S)) * 0.95;
     }
   }
   tx = Math.max(cv.width / 2 / tz, Math.min(W - cv.width / 2 / tz, tx));
   if (cv.width / tz >= W) tx = W / 2;
-  const k = 0.1, kz = tz > cam.z ? 0.16 : 0.06;
+  const k = 0.12, kz = tz > cam.z ? 0.16 : 0.08;
   cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; cam.z += (tz - cam.z) * kz;
   draw();
 
@@ -643,7 +668,7 @@ $('start').addEventListener('click', async () => {
   $('start').disabled = false;
 
   sim = createSim(n, plan.seed, plan.bias);
-  resultId = null; particles = []; acc = 0; last = 0; running = true;
+  resultId = null; particles = []; acc = 0; last = 0; running = true; shot = null;
   cam = { x: W / 2, y: -20 * S, z: baseZoom() * 1.6 };
   $('settings').classList.add('hide');
   $('rank').classList.add('show');
