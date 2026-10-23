@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>핀볼 추첨</title>
+<meta name="description" content="구슬을 굴려 당첨자를 뽑는 핀볼 추첨기">
+<style>
+  :root {
+    --panel: rgba(18, 22, 32, .92);
+    --line: #2a3448;
+    --text: #e8ecf4;
+    --muted: #8a96ad;
+    --accent: #03c75a;
+    --cyan: #19e6ff;
+    --gold: #ffd84d;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: #000; color: var(--text); overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  #settings { position: fixed; left: 12px; top: 12px; width: min(560px, calc(100vw - 24px)); z-index: 20;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+    backdrop-filter: blur(8px); display: flex; flex-direction: column; gap: 10px; transition: opacity .3s; }
+  #settings.hide { opacity: 0; pointer-events: none; }
+  #settings h1 { margin: 0; font-size: 17px; padding-right: 56px; }
+  #settings h1 span { color: var(--accent); }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  textarea { width: 100%; height: 72px; resize: vertical; background: #0b0f17; color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 15px; font-family: inherit; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button, .seg input { background: transparent; color: var(--muted); border: 0; padding: 8px 12px;
+    font-size: 14px; cursor: pointer; font-family: inherit; }
+  .seg input { width: 64px; color: var(--text); text-align: center; border-left: 1px solid var(--line); }
+  .seg button.on { background: var(--accent); color: #fff; font-weight: 700; }
+  .btn { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 10px 16px;
+    font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); font-weight: 500; }
+  .grow { flex: 1; }
+  #status { font-size: 12px; color: var(--muted); min-height: 16px; }
+  #count { font-size: 12px; color: var(--muted); }
+
+  #rank { position: fixed; left: 12px; top: 12px; z-index: 10; font-size: 13px; display: none;
+    pointer-events: none; text-shadow: 0 0 4px #000, 0 0 2px #000; }
+  #rank.show { display: block; }
+  #rank div { display: flex; gap: 6px; align-items: center; padding: 2px 0; }
+  #rank .no { width: 22px; color: var(--muted); text-align: right; }
+  #rank .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+
+  #overlay { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.5); }
+  #overlay.show { display: flex; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px 28px;
+    text-align: center; min-width: 260px; max-width: calc(100% - 32px); }
+  .card .t { color: var(--muted); font-size: 14px; }
+  .card .w { font-size: 34px; font-weight: 800; color: var(--gold); margin: 8px 0 18px; word-break: break-all;
+    text-shadow: 0 0 18px rgba(255,216,77,.6); }
+
+  #secret { position: fixed; top: 0; right: 0; width: 64px; height: 64px; z-index: 50; }
+  #admin { position: fixed; inset: 0; z-index: 60; display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.6); }
+  #admin.show { display: flex; }
+  #admin .card { text-align: left; width: 320px; display: flex; flex-direction: column; gap: 12px; }
+  #admin h3 { margin: 0; font-size: 17px; }
+  #admin select { width: 100%; padding: 10px; font-size: 15px; background: #0b0f17; color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; }
+  #admin .row .btn { flex: 1; padding: 10px; font-size: 14px; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="settings">
+  <h1>핀볼 <span>추첨</span></h1>
+  <div>
+    <label for="names">참가자 (쉼표·줄바꿈 구분, <code>이름*3</code> 은 구슬 3개)</label>
+    <textarea id="names">철수, 영희, 민수, 지영, 현우, 수진</textarea>
+  </div>
+  <div class="row">
+    <label style="margin:0">당첨</label>
+    <div class="seg" id="mode">
+      <button data-mode="first" class="on">1등</button>
+      <button data-mode="last">꼴등</button>
+      <button data-mode="rank">N등</button>
+      <input id="rankIn" type="number" min="1" value="1" inputmode="numeric">
+    </div>
+    <span id="count" class="grow"></span>
+  </div>
+  <div class="row">
+    <span id="status" class="grow"></span>
+    <button class="btn ghost" id="shuffle">섞기</button>
+    <button class="btn" id="start">시작</button>
+  </div>
+</div>
+
+<div id="rank"></div>
+
+<div id="overlay">
+  <div class="card">
+    <div class="t" id="winTitle">당첨</div>
+    <div class="w" id="winner"></div>
+    <button class="btn" id="again">확인</button>
+  </div>
+</div>
+
+<div id="secret"></div>
+<div id="admin">
+  <div class="card">
+    <h3>관리자</h3>
+    <div>
+      <label for="pick">당첨자 지정</label>
+      <select id="pick"></select>
+    </div>
+    <div id="adminInfo" style="font-size:13px;color:var(--muted)"></div>
+    <div class="row">
+      <button class="btn ghost" id="adminClose">닫기</button>
+      <button class="btn" id="adminSave">저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- Map (ported from the "Wheel of fortune" stage, 1 unit = 16px) ----------
+const S = 16, W = 26 * S, H = 113 * S;
+const GOAL_Y = 111 * S, ZOOM_Y = 106.75 * S, ZOOM_R = 5 * S;
+const MR = 0.25 * S, DT = 1 / 240, G = 11 * S, MAX_V = 30 * S, MAX_STEPS = 240 * 150;
+
+const polylines = [
+  [[9.25, -40], [9.25, 8.5], [2, 19.25], [2, 26], [9.75, 30], [9.75, 33.5], [1.25, 41], [1.25, 53.75],
+    [8.25, 58.75], [8.25, 63], [9.25, 64], [8.25, 65], [8.25, 99.25], [15.1, 106.75], [15.1, 113]],
+  [[16.5, -40], [16.5, 9.25], [9.5, 20], [9.5, 22.5], [17.5, 26], [17.5, 33.5], [24, 38.5], [19, 45.5],
+    [19, 55.5], [24, 59.25], [24, 63], [23, 64], [24, 65], [24, 100.5], [16, 106.75], [16, 113]],
+  [[12.75, 37.5], [7, 43.5], [7, 49.75], [12.75, 53.75], [12.75, 37.5]],
+  [[14.75, 37.5], [14.75, 43], [17.5, 40.25], [14.75, 37.5]],
+];
+const segs = [];
+for (const pl of polylines) for (let i = 1; i < pl.length; i++) {
+  pushSeg(pl[i - 1][0] * S, pl[i - 1][1] * S, pl[i][0] * S, pl[i][1] * S, 0.15);
+}
+// short diagonal bars (two staggered rows)
+for (let x = 9.4; x <= 22.8; x += 1.9) {
+  for (const [y, a] of [[66.6, Math.PI / 4], [69.1, -Math.PI / 4]]) {
+    const hx = Math.cos(a) * 0.3 * S, hy = Math.sin(a) * 0.3 * S;
+    pushSeg(x * S - hx, y * S - hy, x * S + hx, y * S + hy, 0.3);
+  }
+}
+function pushSeg(ax, ay, bx, by, e) {
+  segs.push({ ax, ay, bx, by, e,
+    minX: Math.min(ax, bx) - MR - 2, maxX: Math.max(ax, bx) + MR + 2,
+    minY: Math.min(ay, by) - MR - 2, maxY: Math.max(ay, by) + MR + 2 });
+}
+
+const pegs = [];
+for (const [x, y] of [[15.5, 28], [15.5, 30], [15.5, 32], [12.5, 28], [12.5, 30], [12.5, 32]]) pegs.push([x * S, y * S, 2.5, 0.9]);
+for (const [y, xs] of [[92, [9.5, 12.75, 16, 19.25, 22.5]], [95, [11, 14.25, 17.5, 20.75]], [98, [9.5, 12.75, 16, 19.25, 22.5]]]) {
+  for (const x of xs) pegs.push([x * S, y * S, 3, 0.6]);
+}
+
+const rotors = [
+  ...[8, 12, 16, 20, 24].map((x, i) => ({ x: x * S, y: 75 * S, len: 2 * S, w: i % 2 ? -3.5 : 3.5 })),
+  { x: 14 * S, y: 106.75 * S, len: 2 * S, w: -1.2 },
+];
+
+// ---------- Deterministic simulation ----------
+function rng(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// entries: [{id, name}] one per marble (a name with *n appears n times)
+function createSim(count, seed, bias) {
+  const rand = rng(seed);
+  const order = [...Array(count).keys()];
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  const rows = Math.ceil(count / 10);
+  const balls = order.map((id, k) => ({
+    id,
+    x: (10.25 + (k % 10) * 0.6) * S + (rand() - 0.5) * 2,
+    y: (rows - Math.floor(k / 10) + 1) * S * 0.7 + rand() * 2 - 30 * S,
+    vx: 0, vy: 0,
+    g: G * (1 + (bias[id] || 0)),
+    still: 0, done: false,
+  }));
+  return { balls, rand, step: 0, finished: [], result: null };
+}
+
+function bounce(b, nx, ny, pen, svx, svy, e) {
+  b.x += nx * pen; b.y += ny * pen;
+  const vn = (b.vx - svx) * nx + (b.vy - svy) * ny;
+  if (vn < 0) {
+    b.vx -= (1 + e) * vn * nx;
+    b.vy -= (1 + e) * vn * ny;
+    b.vx *= 0.99; b.vy *= 0.99;
+  }
+}
+
+function segHit(b, ax, ay, bx, by, svFn, e) {
+  const dx = bx - ax, dy = by - ay;
+  let t = ((b.x - ax) * dx + (b.y - ay) * dy) / (dx * dx + dy * dy);
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const ox = b.x - (ax + dx * t), oy = b.y - (ay + dy * t);
+  const d = Math.hypot(ox, oy);
+  if (d < MR && d > 1e-6) {
+    const sv = svFn ? svFn(ax + dx * t, ay + dy * t) : [0, 0];
+    bounce(b, ox / d, oy / d, MR - d, sv[0], sv[1], e);
+  }
+}
+
+function stepSim(sim) {
+  const t = sim.step * DT;
+  const live = sim.balls.filter(b => !b.done);
+  for (const b of live) {
+    b.vy += b.g * DT;
+    const sp = Math.hypot(b.vx, b.vy);
+    if (sp > MAX_V) { b.vx *= MAX_V / sp; b.vy *= MAX_V / sp; }
+    b.x += b.vx * DT; b.y += b.vy * DT;
+
+    for (const p of pegs) {
+      const dx = b.x - p[0], dy = b.y - p[1];
+      if (Math.abs(dx) > MR + p[2] || Math.abs(dy) > MR + p[2]) continue;
+      const d = Math.hypot(dx, dy), m = MR + p[2];
+      if (d < m && d > 1e-6) bounce(b, dx / d, dy / d, m - d, 0, 0, p[3]);
+    }
+    for (const s of segs) {
+      if (b.x < s.minX || b.x > s.maxX || b.y < s.minY || b.y > s.maxY) continue;
+      segHit(b, s.ax, s.ay, s.bx, s.by, null, s.e);
+    }
+    for (const o of rotors) {
+      if (Math.abs(b.y - o.y) > o.len / 2 + MR || Math.abs(b.x - o.x) > o.len / 2 + MR) continue;
+      const a = o.w * t, hx = Math.cos(a) * o.len / 2, hy = Math.sin(a) * o.len / 2;
+      segHit(b, o.x - hx, o.y - hy, o.x + hx, o.y + hy,
+        (px, py) => [-o.w * (py - o.y), o.w * (px - o.x)], 0.3);
+    }
+    // watchdog: shake a marble that sits still (original does this after 5s)
+    if (Math.abs(b.vx) + Math.abs(b.vy) < 6) {
+      if (++b.still > 240 * 2) { b.vx += (sim.rand() - 0.5) * 8 * S; b.vy -= 3 * S; b.still = 0; }
+    } else b.still = 0;
+  }
+
+  for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
+    const a = live[i], c = live[j];
+    const dx = c.x - a.x, dy = c.y - a.y;
+    if (Math.abs(dx) > 2 * MR || Math.abs(dy) > 2 * MR) continue;
+    const d = Math.hypot(dx, dy);
+    if (d < 2 * MR && d > 1e-6) {
+      const nx = dx / d, ny = dy / d, pen = (2 * MR - d) / 2;
+      a.x -= nx * pen; a.y -= ny * pen; c.x += nx * pen; c.y += ny * pen;
+      const vn = (c.vx - a.vx) * nx + (c.vy - a.vy) * ny;
+      if (vn < 0) {
+        const imp = -(1 + 0.5) * vn / 2;
+        a.vx -= imp * nx; a.vy -= imp * ny; c.vx += imp * nx; c.vy += imp * ny;
+      }
+    }
+  }
+
+  for (const b of live) if (b.y > GOAL_Y) { b.done = true; b.doneAt = sim.step; sim.finished.push(b.id); }
+  sim.step++;
+}
+
+// unfinished marbles ranked by progress (further down = ahead)
+function liveRanked(sim) {
+  return sim.balls.filter(b => !b.done).sort((a, b) => b.y - a.y);
+}
+
+// winner at rankIdx is decided once that many have finished, or when only one marble remains
+function decideWinner(sim, rankIdx) {
+  if (sim.finished.length > rankIdx) return sim.finished[rankIdx];
+  const live = liveRanked(sim);
+  if (live.length === 1 && sim.finished.length === rankIdx) return live[0].id;
+  if (sim.step >= MAX_STEPS) return sim.finished.concat(live.map(b => b.id))[rankIdx];
+  return null;
+}
+
+function runHeadless(count, seed, bias, rankIdx) {
+  const sim = createSim(count, seed, bias);
+  let w;
+  while ((w = decideWinner(sim, rankIdx)) === null) stepSim(sim);
+  return w;
+}
+
+// Search a seed whose natural outcome puts `target` at rankIdx. For first/last, escalate a
+// gravity bias if plain seeds run out; middle ranks are found by seed search alone.
+async function findPlan(count, target, rankIdx, onProgress) {
+  const edge = rankIdx === 0 ? 1 : rankIdx === count - 1 ? -1 : 0;
+  const levels = edge ? [0, 0.04, 0.08, 0.15, 0.25, 0.4] : [0];
+  const perLevel = edge ? 60 : Math.min(600, count * 8);
+  let seed = (Math.random() * 2 ** 31) | 0, tried = 0;
+  for (const lv of levels) {
+    const bias = lv ? { [target]: edge * lv } : {};
+    for (let n = 0; n < perLevel; n++, seed++) {
+      if (runHeadless(count, seed, bias, rankIdx) === target) return { seed, bias };
+      if (++tried % 3 === 0) { onProgress && onProgress(tried); await new Promise(r => setTimeout(r)); }
+    }
+  }
+  return { seed, bias: edge ? { [target]: edge * 0.8 } : {} };
+}
+
+// ---------- UI ----------
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+let mode = 'first', entries = [], sim = null, raf = 0, acc = 0, last = 0, rankIdx = 0;
+let cam = { x: W / 2, y: 0, z: 1 }, particles = [], running = false, resultId = null, resultAt = 0;
+let forced = null;
+try { forced = localStorage.getItem('pinball.forced'); } catch (e) {}
+try { const v = localStorage.getItem('pinball.names'); if (v) $('names').value = v; } catch (e) {}
+
+const hueOf = (id, n) => (360 / n) * id;
+const colorOf = (id, n) => `hsl(${hueOf(id, n)} 100% 70%)`;
+
+function parseEntries() {
+  const out = [];
+  for (const raw of $('names').value.split(/[,\n]/)) {
+    const m = /^\s*([^*\/]+?)\s*(?:\*\s*(\d+))?\s*(?:\/\s*\d+)?\s*$/.exec(raw);
+    if (!m) continue;
+    const n = Math.min(parseInt(m[2] || '1', 10) || 1, 50);
+    for (let i = 0; i < n; i++) out.push({ id: out.length, name: m[1] });
+  }
+  return out.slice(0, 100);
+}
+function uniqueNames() { return [...new Set(parseEntries().map(e => e.name))]; }
+
+function refreshCount() {
+  const n = parseEntries().length;
+  $('count').textContent = n ? `구슬 ${n}개` : '';
+  $('rankIn').max = Math.max(1, n);
+  try { localStorage.setItem('pinball.names', $('names').value); } catch (e) {}
+}
+$('names').addEventListener('input', refreshCount);
+refreshCount();
+
+$('mode').addEventListener('click', e => {
+  const m = e.target.dataset.mode;
+  if (!m) return;
+  mode = m;
+  for (const b of $('mode').querySelectorAll('button')) b.classList.toggle('on', b.dataset.mode === m);
+});
+$('rankIn').addEventListener('focus', () => $('mode').querySelector('[data-mode=rank]').click());
+
+function currentRankIdx(n) {
+  if (mode === 'first') return 0;
+  if (mode === 'last') return n - 1;
+  return Math.min(n, Math.max(1, parseInt($('rankIn').value, 10) || 1)) - 1;
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(innerWidth * dpr);
+  cv.height = Math.round(innerHeight * dpr);
+  draw();
+}
+window.addEventListener('resize', resize);
+
+function baseZoom() { return Math.min(cv.width / W, cv.height / (H * 0.45)); }
+
+function draw() {
+  const n = sim ? sim.balls.length : 1;
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  const z = cam.z;
+  ctx.setTransform(z, 0, 0, z, cv.width / 2 - cam.x * z, cv.height / 2 - cam.y * z);
+  const viewTop = cam.y - cv.height / 2 / z, viewBot = cam.y + cv.height / 2 / z;
+  const t = sim ? sim.step * DT : 0;
+
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.shadowColor = '#19e6ff'; ctx.shadowBlur = 12 * dpr;
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+  for (const pl of polylines) {
+    ctx.beginPath();
+    pl.forEach(([x, y], i) => i ? ctx.lineTo(x * S, y * S) : ctx.moveTo(x * S, y * S));
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#19e6ff'; ctx.lineWidth = 3;
+  for (const s of segs) {
+    if (s.e !== 0.3 || s.maxY < viewTop || s.minY > viewBot) continue;
+    ctx.beginPath(); ctx.moveTo(s.ax, s.ay); ctx.lineTo(s.bx, s.by); ctx.stroke();
+  }
+  ctx.fillStyle = '#19e6ff';
+  for (const p of pegs) {
+    if (p[1] < viewTop - 10 || p[1] > viewBot + 10) continue;
+    ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(Math.PI / 4);
+    ctx.fillRect(-p[2], -p[2], p[2] * 2, p[2] * 2); ctx.restore();
+  }
+  ctx.strokeStyle = '#19e6ff'; ctx.lineWidth = 2.5;
+  for (const o of rotors) {
+    const a = o.w * t, hx = Math.cos(a) * o.len / 2, hy = Math.sin(a) * o.len / 2;
+    ctx.beginPath(); ctx.moveTo(o.x - hx, o.y - hy); ctx.lineTo(o.x + hx, o.y + hy); ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+
+  ctx.strokeStyle = '#ffd84d'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(15.1 * S, GOAL_Y); ctx.lineTo(16 * S, GOAL_Y); ctx.stroke();
+  ctx.setLineDash([]);
+
+  if (sim) {
+    ctx.textAlign = 'center';
+    for (const b of sim.balls) {
+      if (b.done && sim.step - b.doneAt > 120) continue;
+      if (b.y < viewTop - 20 || b.y > viewBot + 20) continue;
+      ctx.beginPath(); ctx.arc(b.x, b.y, MR, 0, Math.PI * 2);
+      ctx.fillStyle = colorOf(b.id, n); ctx.fill();
+      ctx.save(); ctx.translate(b.x, b.y + MR + 1); ctx.scale(1 / z, 1 / z);
+      ctx.font = `bold ${12 * dpr}px sans-serif`; ctx.textBaseline = 'top';
+      ctx.lineWidth = 3 * dpr; ctx.strokeStyle = '#000';
+      ctx.strokeText(entries[b.id].name, 0, 0);
+      ctx.fillStyle = colorOf(b.id, n); ctx.fillText(entries[b.id].name, 0, 0);
+      ctx.restore();
+    }
+  }
+
+  // particles and minimap are drawn in screen space
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (const p of particles) {
+    ctx.fillStyle = p.c; ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillRect(p.x, p.y, 4 * dpr, 7 * dpr);
+  }
+  ctx.globalAlpha = 1;
+  drawMinimap(dpr, n);
+}
+
+function drawMinimap(dpr, n) {
+  const ms = Math.min((cv.height - 24 * dpr) / H, 48 * dpr / W);
+  const mh = H * ms, mw = W * ms, mx = cv.width - mw - 8 * dpr, my = 12 * dpr;
+  ctx.fillStyle = 'rgba(40,40,40,.6)'; ctx.fillRect(mx - 2, my - 2, mw + 4, mh + 4);
+  ctx.setTransform(ms, 0, 0, ms, mx, my);
+  ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1 / ms;
+  for (const pl of polylines) {
+    ctx.beginPath();
+    pl.forEach(([x, y], i) => i ? ctx.lineTo(x * S, y * S) : ctx.moveTo(x * S, y * S));
+    ctx.stroke();
+  }
+  if (sim) for (const b of sim.balls) {
+    if (b.done) continue;
+    ctx.fillStyle = colorOf(b.id, n);
+    ctx.beginPath(); ctx.arc(b.x, b.y, 2.5 / ms, 0, Math.PI * 2); ctx.fill();
+  }
+  const vh = cv.height / cam.z, vw = cv.width / cam.z;
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 1 / ms;
+  ctx.strokeRect(Math.max(0, cam.x - vw / 2), cam.y - vh / 2, Math.min(W, vw), vh);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+function renderRank() {
+  const n = sim.balls.length;
+  const order = sim.finished.map(id => ({ id, done: true })).concat(liveRanked(sim).map(b => ({ id: b.id })));
+  $('rank').innerHTML = order.slice(0, 30).map((o, i) =>
+    `<div style="opacity:${o.done ? .55 : 1}"><span class="no">${i + 1}</span><span class="dot" style="background:${colorOf(o.id, n)}"></span>` +
+    `<span style="${i === rankIdx ? 'color:var(--gold);font-weight:700' : ''}">${esc(entries[o.id].name)}</span></div>`
+  ).join('');
+}
+function esc(s) {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function focusMarble() {
+  const live = liveRanked(sim);
+  const i = rankIdx - sim.finished.length;
+  const target = live[Math.max(0, Math.min(live.length - 1, i))];
+  const rival = live[i + 1] || live[i - 1];
+  if (!target) return null;
+  // zoom and slow-motion follow whichever of the two cutoff rivals is nearer the goal (as in the original)
+  const near = m => Math.max(0, 1 - Math.abs(ZOOM_Y - m.y) / ZOOM_R);
+  const focus = rival && near(rival) > near(target) ? rival : target;
+  const contested = !!rival && sim.finished.length <= rankIdx;
+  return { focus, intensity: contested ? near(focus) : 0 };
+}
+
+function loop(ts) {
+  if (!last) last = ts;
+  const f = focusMarble();
+  const timeScale = f && f.intensity > 0 ? Math.max(0.2, 1 - f.intensity) : 1;
+  acc += Math.min((ts - last) / 1000, 0.1) * timeScale;
+  last = ts;
+
+  let changed = false;
+  while (acc >= DT && resultId === null) {
+    const before = sim.finished.length;
+    stepSim(sim);
+    acc -= DT;
+    if (sim.finished.length !== before) {
+      changed = true;
+      if (sim.finished.length - 1 === rankIdx) confetti();
+    }
+    const w = decideWinner(sim, rankIdx);
+    if (w !== null) { resultId = w; resultAt = ts; if (sim.finished.length <= rankIdx) confetti(); }
+  }
+  if (changed) renderRank();
+
+  const dpr = window.devicePixelRatio || 1;
+  for (const p of particles) { p.x += p.vx; p.y += p.vy; p.vy += 0.15 * dpr; p.life -= 0.012; }
+  particles = particles.filter(p => p.life > 0);
+
+  const bz = baseZoom();
+  let tz = bz, tx = W / 2, ty = cam.y;
+  if (f) {
+    const live = liveRanked(sim);
+    tx = f.focus.x; ty = f.focus.y + (cv.height / bz) * 0.15;
+    tz = bz * (1 + 1.5 * f.intensity);
+    const spread = live.length ? live[0].y - live[live.length - 1].y : 0;
+    if (f.intensity === 0 && spread < cv.height / bz * 0.5) ty = (live[0].y + live[live.length - 1].y) / 2;
+  }
+  tx = Math.max(cv.width / 2 / tz, Math.min(W - cv.width / 2 / tz, tx));
+  if (cv.width / tz >= W) tx = W / 2;
+  const k = 0.08;
+  cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; cam.z += (tz - cam.z) * k;
+  draw();
+
+  if (resultId !== null && ts - resultAt > 1200) return finish();
+  raf = requestAnimationFrame(loop);
+}
+
+function confetti() {
+  const dpr = window.devicePixelRatio || 1;
+  for (let i = 0; i < 120; i++) {
+    const a = Math.random() * Math.PI * 2, sp = (3 + Math.random() * 9) * dpr;
+    particles.push({ x: cv.width / 2, y: cv.height / 2, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 4 * dpr,
+      c: `hsl(${Math.random() * 360} 100% 65%)`, life: 1 + Math.random() });
+  }
+}
+
+function finish() {
+  running = false;
+  $('winTitle').textContent = mode === 'first' ? '1등' : mode === 'last' ? '꼴등' : `${rankIdx + 1}등`;
+  $('winner').textContent = entries[resultId].name;
+  $('overlay').classList.add('show');
+}
+
+$('start').addEventListener('click', async () => {
+  entries = parseEntries();
+  if (entries.length < 2) { $('status').textContent = '참가자를 2명 이상 입력하세요.'; return; }
+  const n = entries.length;
+  rankIdx = currentRankIdx(n);
+  cancelAnimationFrame(raf);
+  $('overlay').classList.remove('show');
+  $('start').disabled = true;
+
+  let plan = { seed: (Math.random() * 2 ** 31) | 0, bias: {} };
+  const candidates = forced ? entries.filter(e => e.name === forced).map(e => e.id) : [];
+  if (candidates.length) {
+    $('status').textContent = '구슬을 준비하는 중...';
+    const target = candidates[Math.floor(Math.random() * candidates.length)];
+    plan = await findPlan(n, target, rankIdx, k => { $('status').textContent = `구슬을 준비하는 중... ${k}`; });
+  }
+  $('status').textContent = '';
+  $('start').disabled = false;
+
+  sim = createSim(n, plan.seed, plan.bias);
+  resultId = null; particles = []; acc = 0; last = 0; running = true;
+  cam = { x: W / 2, y: -20 * S, z: baseZoom() * 1.6 };
+  $('settings').classList.add('hide');
+  $('rank').classList.add('show');
+  renderRank();
+  // ?skip=<sec> fast-forwards the simulation (used for headless screenshots)
+  const skip = parseFloat(new URLSearchParams(location.search).get('skip'));
+  if (skip > 0) {
+    for (let i = 0; i < skip * 240 && decideWinner(sim, rankIdx) === null; i++) stepSim(sim);
+    renderRank();
+    const f = focusMarble();
+    if (f) cam = { x: f.focus.x, y: f.focus.y, z: baseZoom() * (1 + 1.5 * f.intensity) };
+    $('settings').style.transition = 'none';
+  }
+  raf = requestAnimationFrame(loop);
+});
+
+$('shuffle').addEventListener('click', () => {
+  const names = parseEntries();
+  for (let i = names.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [names[i], names[j]] = [names[j], names[i]];
+  }
+  const counts = new Map();
+  for (const e of names) counts.set(e.name, (counts.get(e.name) || 0) + 1);
+  $('names').value = [...counts].map(([k, v]) => v > 1 ? `${k}*${v}` : k).join(', ');
+  refreshCount();
+});
+
+$('again').addEventListener('click', () => {
+  $('overlay').classList.remove('show');
+  $('rank').classList.remove('show');
+  $('settings').classList.remove('hide');
+});
+
+// ---------- Hidden admin: tap the top-right corner 7 times ----------
+let taps = 0, tapTimer = 0;
+$('secret').addEventListener('click', () => {
+  taps++;
+  clearTimeout(tapTimer);
+  tapTimer = setTimeout(() => { taps = 0; }, 1500);
+  if (taps >= 7) { taps = 0; openAdmin(); }
+});
+
+function openAdmin() {
+  const list = uniqueNames();
+  $('pick').innerHTML = '<option value="">랜덤 (지정 안 함)</option>' +
+    list.map(nm => `<option${nm === forced ? ' selected' : ''}>${esc(nm)}</option>`).join('');
+  $('adminInfo').textContent = forced
+    ? `현재 지정: ${forced}${list.includes(forced) ? '' : ' (참가자 목록에 없음)'} - 선택한 당첨 등수에 들어갑니다`
+    : '현재 지정: 없음';
+  $('admin').classList.add('show');
+}
+
+$('adminClose').addEventListener('click', () => $('admin').classList.remove('show'));
+$('adminSave').addEventListener('click', () => {
+  forced = $('pick').value || null;
+  try {
+    if (forced) localStorage.setItem('pinball.forced', forced);
+    else localStorage.removeItem('pinball.forced');
+  } catch (e) {}
+  $('admin').classList.remove('show');
+});
+
+resize();
+cam = { x: W / 2, y: 10 * S, z: baseZoom() };
+draw();
+if (location.search.includes('autostart')) $('start').click();
+</script>
+</body>
+</html>
