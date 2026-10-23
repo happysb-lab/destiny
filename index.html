@@ -182,9 +182,9 @@ const MAPS = [
     rotors: [
       { x: 11, y: 12, len: 4, w: -3 }, { x: 15, y: 12, len: 4, w: 3 },
       ...[[8, 87, 2], [6, 86.4, 3], [4, 84.6, 3], [3.5, 81.6, 4], [3, 78.6, 4], [2.75, 75.6, 4],
-        [2.5, 72.6, 4], [2.25, 69.6, 4], [2, 66.6, 4]].map(([x, y, len]) => ({ x, y, len, w: -10, mu: 0.3 })),
+        [2.5, 72.6, 4], [2.25, 69.6, 4], [2, 66.6, 4]].map(([x, y, len]) => ({ x, y, len, w: -5, mu: 0.3 })),
       ...[[18, 87, 2], [20, 86.4, 3], [22, 84.6, 3], [22.5, 81.6, 4], [23, 78.6, 4], [23.25, 75.6, 4],
-        [23.5, 72.6, 4], [23.75, 69.6, 4], [24, 66.6, 4]].map(([x, y, len]) => ({ x, y, len, w: 10, mu: 0.3 })),
+        [23.5, 72.6, 4], [23.75, 69.6, 4], [24, 66.6, 4]].map(([x, y, len]) => ({ x, y, len, w: 5, mu: 0.3 })),
     ],
   },
 ];
@@ -247,7 +247,7 @@ function createSim(count, seed, bias) {
     g: G * (1 + (bias[id] || 0)),
     still: 0, done: false,
   }));
-  return { balls, rand, step: 0, finished: [], result: null };
+  return { balls, rand, step: 0, finished: [], result: null, respawns: 0 };
 }
 
 function bounce(b, nx, ny, pen, svx, svy, e, mu) {
@@ -293,16 +293,18 @@ function stepSim(sim) {
       const d = Math.hypot(dx, dy), m = MR + p[2];
       if (d < m && d > 1e-6) bounce(b, dx / d, dy / d, m - d, 0, 0, p[3]);
     }
-    for (const s of segs) {
-      if (b.x < s.minX || b.x > s.maxX || b.y < s.minY || b.y > s.maxY) continue;
-      segHit(b, s.ax, s.ay, s.bx, s.by, null, s.e);
-    }
     for (const o of rotors) {
       if (Math.abs(b.y - o.y) > o.len / 2 + MR || Math.abs(b.x - o.x) > o.len / 2 + MR) continue;
       const a = o.w * t, hx = Math.cos(a) * o.len / 2, hy = Math.sin(a) * o.len / 2;
       segHit(b, o.x - hx, o.y - hy, o.x + hx, o.y + hy,
         (px, py) => [-o.w * (py - o.y), o.w * (px - o.x)], 0.3, o.mu);
     }
+    // walls resolve last so a rotor passing through a wall cannot shove a marble outside it
+    for (const s of segs) {
+      if (b.x < s.minX || b.x > s.maxX || b.y < s.minY || b.y > s.maxY) continue;
+      segHit(b, s.ax, s.ay, s.bx, s.by, null, s.e);
+    }
+    if (b.x < 1.5 * S || b.x > 24.5 * S || b.y > H + 10 * S) { b.x = 13 * S; b.y = 5 * S; b.vx = 0; b.vy = 0; sim.respawns++; }
     // watchdog: shake a marble that sits still (original does this after 5s)
     if (Math.abs(b.vx) + Math.abs(b.vy) < 6) {
       if (++b.still > 240 * 2) { b.vx += (sim.rand() - 0.5) * 8 * S; b.vy -= 3 * S; b.still = 0; }
@@ -325,7 +327,9 @@ function stepSim(sim) {
     }
   }
 
-  for (const b of live) if (b.y > GOAL_Y) { b.done = true; b.doneAt = sim.step; sim.finished.push(b.id); }
+  for (const b of live) {
+    if (b.y > GOAL_Y && b.x >= map.goalX[0] * S && b.x <= map.goalX[1] * S) { b.done = true; b.doneAt = sim.step; sim.finished.push(b.id); }
+  }
   sim.step++;
 }
 
@@ -601,8 +605,8 @@ function loop(ts) {
   let tz = bz, tx = W / 2, ty = cam.y;
   if (f && f.intensity > 0) {
     // finish duel: zoom hard onto the cutoff marble
-    tx = f.focus.x; ty = f.focus.y + (cv.height / bz) * 0.1;
-    tz = bz * (1 + 3.5 * Math.pow(f.intensity, 0.7));
+    tz = bz * (1 + 2.5 * Math.pow(f.intensity, 0.7));
+    tx = f.focus.x; ty = f.focus.y - (cv.height / tz) * 0.2;
     shot = null;
   } else if (f) {
     const live = liveRanked(sim);
@@ -679,7 +683,7 @@ $('start').addEventListener('click', async () => {
     for (let i = 0; i < skip * 240 && decideWinner(sim, rankIdx) === null; i++) stepSim(sim);
     renderRank();
     const f = focusMarble();
-    if (f) cam = { x: f.focus.x, y: f.focus.y, z: baseZoom() * (1 + 3.5 * Math.pow(f.intensity, 0.7)) };
+    if (f) cam = { x: f.focus.x, y: f.focus.y, z: baseZoom() * (1 + 2.5 * Math.pow(f.intensity, 0.7)) };
     $('settings').style.transition = 'none';
   }
   raf = requestAnimationFrame(loop);
