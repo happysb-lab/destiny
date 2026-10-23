@@ -80,6 +80,10 @@
     <textarea id="names">철수, 영희, 민수, 지영, 현우, 수진</textarea>
   </div>
   <div class="row">
+    <label style="margin:0">맵</label>
+    <div class="seg" id="maps"></div>
+  </div>
+  <div class="row">
     <label style="margin:0">당첨</label>
     <div class="seg" id="mode">
       <button data-mode="first" class="on">1등</button>
@@ -123,46 +127,96 @@
 </div>
 
 <script>
-// ---------- Map (ported from the "Wheel of fortune" stage, 1 unit = 16px) ----------
-const S = 16, W = 26 * S, H = 113 * S;
-const GOAL_Y = 111 * S, ZOOM_Y = 106.75 * S, ZOOM_R = 5 * S;
+// ---------- Maps (ported from the original stages, 1 unit = 16px) ----------
+const S = 16, W = 26 * S;
 const MR = 0.25 * S, DT = 1 / 240, G = 11 * S, MAX_V = 30 * S, MAX_STEPS = 240 * 150;
 
-const polylines = [
-  [[9.25, -40], [9.25, 8.5], [2, 19.25], [2, 26], [9.75, 30], [9.75, 33.5], [1.25, 41], [1.25, 53.75],
-    [8.25, 58.75], [8.25, 63], [9.25, 64], [8.25, 65], [8.25, 99.25], [15.1, 106.75], [15.1, 113]],
-  [[16.5, -40], [16.5, 9.25], [9.5, 20], [9.5, 22.5], [17.5, 26], [17.5, 33.5], [24, 38.5], [19, 45.5],
-    [19, 55.5], [24, 59.25], [24, 63], [23, 64], [24, 65], [24, 100.5], [16, 106.75], [16, 113]],
-  [[12.75, 37.5], [7, 43.5], [7, 49.75], [12.75, 53.75], [12.75, 37.5]],
-  [[14.75, 37.5], [14.75, 43], [17.5, 40.25], [14.75, 37.5]],
-];
-const segs = [];
-for (const pl of polylines) for (let i = 1; i < pl.length; i++) {
-  pushSeg(pl[i - 1][0] * S, pl[i - 1][1] * S, pl[i][0] * S, pl[i][1] * S, 0.15);
-}
-// short diagonal bars (two staggered rows)
+const wheelBars = [];
 for (let x = 9.4; x <= 22.8; x += 1.9) {
-  for (const [y, a] of [[66.6, Math.PI / 4], [69.1, -Math.PI / 4]]) {
-    const hx = Math.cos(a) * 0.3 * S, hy = Math.sin(a) * 0.3 * S;
-    pushSeg(x * S - hx, y * S - hy, x * S + hx, y * S + hy, 0.3);
+  for (const [y, a] of [[66.6, 45], [69.1, -45]]) wheelBars.push({ x, y, len: 1.2, rot: a });
+}
+const MAPS = [
+  {
+    title: '행운의 수레바퀴', height: 113, goalY: 111, goalX: [15.1, 16], zoomY: 106.75,
+    polylines: [
+      [[9.25, -40], [9.25, 8.5], [2, 19.25], [2, 26], [9.75, 30], [9.75, 33.5], [1.25, 41], [1.25, 53.75],
+        [8.25, 58.75], [8.25, 63], [9.25, 64], [8.25, 65], [8.25, 99.25], [15.1, 106.75], [15.1, 113]],
+      [[16.5, -40], [16.5, 9.25], [9.5, 20], [9.5, 22.5], [17.5, 26], [17.5, 33.5], [24, 38.5], [19, 45.5],
+        [19, 55.5], [24, 59.25], [24, 63], [23, 64], [24, 65], [24, 100.5], [16, 106.75], [16, 113]],
+      [[12.75, 37.5], [7, 43.5], [7, 49.75], [12.75, 53.75], [12.75, 37.5]],
+      [[14.75, 37.5], [14.75, 43], [17.5, 40.25], [14.75, 37.5]],
+    ],
+    bars: wheelBars,
+    pegs: [
+      ...[[15.5, 28], [15.5, 30], [15.5, 32], [12.5, 28], [12.5, 30], [12.5, 32]].map(([x, y]) => [x, y, 4.5, 0.9]),
+      ...[9.5, 12.75, 16, 19.25, 22.5].flatMap(x => [[x, 92, 5.5, 0.6], [x, 98, 5.5, 0.6]]),
+      ...[11, 14.25, 17.5, 20.75].map(x => [x, 95, 5.5, 0.6]),
+    ],
+    diamonds: [],
+    rotors: [
+      ...[8, 12, 16, 20, 24].map((x, i) => ({ x, y: 75, len: 4, w: i % 2 ? -3.5 : 3.5 })),
+      // spins the other way than the original: this engine lets marbles through only in this direction
+      { x: 14, y: 106.75, len: 5.5, w: 1.2, thick: true },
+    ],
+  },
+  {
+    title: '욕망의 항아리', height: 93, goalY: 91, goalX: [12, 14], zoomY: 92.5,
+    // marbles that miss the center exit ride the side conveyors back up; show the whole pot meanwhile
+    cameraZone: { x: 13, y: 74, w: 24, h: 28 },
+    zoomZone: { x: 13, y: 77, w: 8, h: 10 },
+    polylines: [
+      [[17, -40], [9, -40], [9, 8.5], [2, 15], [6, 61.5]],
+      [[7, 67.2], [9, 85.2], [8, 84.9], [6, 84.6], [5, 78.6], [4, 66.6], [7, 67.2]],
+      [[17, -40], [17, 8.5], [24, 15], [20, 61.5]],
+      [[19, 67.2], [17, 85.2], [18, 84.9], [20, 84.6], [21, 78.6], [22, 66.6], [19, 67.2]],
+      [[11, 77.4], [12, 78.6], [12, 91.8]],
+      [[15, 77.4], [14, 78.6], [14, 91.8]],
+      [[12, 85.8], [11, 86.4], [9, 87], [8, 87], [6, 86.4], [5, 85.8], [4, 84.6], [3, 78.6], [2, 66.6],
+        [3, 63.6], [4, 62.4], [5, 61.8], [6, 61.5]],
+      [[14, 85.8], [15, 86.4], [17, 87], [18, 87], [20, 86.4], [21, 85.8], [22, 84.6], [23, 78.6], [24, 66.6],
+        [23, 63.6], [22, 62.4], [21, 61.8], [20, 61.5]],
+    ],
+    bars: [],
+    pegs: [],
+    diamonds: [[13, 20, 3], [13, 55, 3], [8, 37, 2], [18, 37, 2]],
+    rotors: [
+      { x: 11, y: 12, len: 4, w: -3 }, { x: 15, y: 12, len: 4, w: 3 },
+      ...[[8, 87, 2], [6, 86.4, 3], [4, 84.6, 3], [3.5, 81.6, 4], [3, 78.6, 4], [2.75, 75.6, 4],
+        [2.5, 72.6, 4], [2.25, 69.6, 4], [2, 66.6, 4]].map(([x, y, len]) => ({ x, y, len, w: -10, mu: 0.3 })),
+      ...[[18, 87, 2], [20, 86.4, 3], [22, 84.6, 3], [22.5, 81.6, 4], [23, 78.6, 4], [23.25, 75.6, 4],
+        [23.5, 72.6, 4], [23.75, 69.6, 4], [24, 66.6, 4]].map(([x, y, len]) => ({ x, y, len, w: 10, mu: 0.3 })),
+    ],
+  },
+];
+
+let map, H, GOAL_Y, ZOOM_Y, polylines, segs, pegs, rotors;
+const ZOOM_R = 5 * S;
+
+function loadMap(i) {
+  map = MAPS[i];
+  H = map.height * S; GOAL_Y = map.goalY * S; ZOOM_Y = map.zoomY * S;
+  polylines = map.polylines.map(pl => pl.map(([x, y]) => [x * S, y * S]));
+  // diamonds are the original's 45-degree boxes; drawn filled, collided as four edges
+  for (const [cx, cy, w] of map.diamonds) {
+    const r = w * Math.SQRT2;
+    polylines.push([[cx, cy - r], [cx + r, cy], [cx, cy + r], [cx - r, cy], [cx, cy - r]].map(([x, y]) => [x * S, y * S]));
   }
+  polylines.forEach((pl, k) => { pl.diamond = k >= map.polylines.length; });
+  segs = [];
+  for (const pl of polylines) for (let i = 1; i < pl.length; i++) pushSeg(pl[i - 1][0], pl[i - 1][1], pl[i][0], pl[i][1], 0.15);
+  for (const b of map.bars) {
+    const a = b.rot * Math.PI / 180, hx = Math.cos(a) * b.len / 2 * S, hy = Math.sin(a) * b.len / 2 * S;
+    pushSeg(b.x * S - hx, b.y * S - hy, b.x * S + hx, b.y * S + hy, 0.3);
+  }
+  pegs = map.pegs.map(([x, y, r, e]) => [x * S, y * S, r, e]);
+  rotors = map.rotors.map(o => ({ x: o.x * S, y: o.y * S, len: o.len * S, w: o.w, mu: o.mu || 0, thick: !!o.thick }));
 }
 function pushSeg(ax, ay, bx, by, e) {
   segs.push({ ax, ay, bx, by, e,
     minX: Math.min(ax, bx) - MR - 2, maxX: Math.max(ax, bx) + MR + 2,
     minY: Math.min(ay, by) - MR - 2, maxY: Math.max(ay, by) + MR + 2 });
 }
-
-const pegs = [];
-for (const [x, y] of [[15.5, 28], [15.5, 30], [15.5, 32], [12.5, 28], [12.5, 30], [12.5, 32]]) pegs.push([x * S, y * S, 2.5, 0.9]);
-for (const [y, xs] of [[92, [9.5, 12.75, 16, 19.25, 22.5]], [95, [11, 14.25, 17.5, 20.75]], [98, [9.5, 12.75, 16, 19.25, 22.5]]]) {
-  for (const x of xs) pegs.push([x * S, y * S, 3, 0.6]);
-}
-
-const rotors = [
-  ...[8, 12, 16, 20, 24].map((x, i) => ({ x: x * S, y: 75 * S, len: 2 * S, w: i % 2 ? -3.5 : 3.5 })),
-  { x: 14 * S, y: 106.75 * S, len: 2 * S, w: -1.2 },
-];
+loadMap(0);
 
 // ---------- Deterministic simulation ----------
 function rng(seed) {
@@ -196,17 +250,23 @@ function createSim(count, seed, bias) {
   return { balls, rand, step: 0, finished: [], result: null };
 }
 
-function bounce(b, nx, ny, pen, svx, svy, e) {
+function bounce(b, nx, ny, pen, svx, svy, e, mu) {
   b.x += nx * pen; b.y += ny * pen;
-  const vn = (b.vx - svx) * nx + (b.vy - svy) * ny;
+  const rvx = b.vx - svx, rvy = b.vy - svy;
+  const vn = rvx * nx + rvy * ny;
   if (vn < 0) {
     b.vx -= (1 + e) * vn * nx;
     b.vy -= (1 + e) * vn * ny;
     b.vx *= 0.99; b.vy *= 0.99;
   }
+  // friction drags the tangential velocity toward the surface's (how the conveyors carry marbles)
+  if (mu) {
+    const tx = rvx - vn * nx, ty = rvy - vn * ny;
+    b.vx -= tx * mu; b.vy -= ty * mu;
+  }
 }
 
-function segHit(b, ax, ay, bx, by, svFn, e) {
+function segHit(b, ax, ay, bx, by, svFn, e, mu) {
   const dx = bx - ax, dy = by - ay;
   let t = ((b.x - ax) * dx + (b.y - ay) * dy) / (dx * dx + dy * dy);
   t = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -214,7 +274,7 @@ function segHit(b, ax, ay, bx, by, svFn, e) {
   const d = Math.hypot(ox, oy);
   if (d < MR && d > 1e-6) {
     const sv = svFn ? svFn(ax + dx * t, ay + dy * t) : [0, 0];
-    bounce(b, ox / d, oy / d, MR - d, sv[0], sv[1], e);
+    bounce(b, ox / d, oy / d, MR - d, sv[0], sv[1], e, mu);
   }
 }
 
@@ -241,7 +301,7 @@ function stepSim(sim) {
       if (Math.abs(b.y - o.y) > o.len / 2 + MR || Math.abs(b.x - o.x) > o.len / 2 + MR) continue;
       const a = o.w * t, hx = Math.cos(a) * o.len / 2, hy = Math.sin(a) * o.len / 2;
       segHit(b, o.x - hx, o.y - hy, o.x + hx, o.y + hy,
-        (px, py) => [-o.w * (py - o.y), o.w * (px - o.x)], 0.3);
+        (px, py) => [-o.w * (py - o.y), o.w * (px - o.x)], 0.3, o.mu);
     }
     // watchdog: shake a marble that sits still (original does this after 5s)
     if (Math.abs(b.vx) + Math.abs(b.vy) < 6) {
@@ -340,6 +400,19 @@ function refreshCount() {
 $('names').addEventListener('input', refreshCount);
 refreshCount();
 
+$('maps').innerHTML = MAPS.map((m, i) => `<button data-map="${i}">${m.title}</button>`).join('');
+function selectMap(i) {
+  loadMap(i);
+  for (const b of $('maps').children) b.classList.toggle('on', +b.dataset.map === i);
+  try { localStorage.setItem('pinball.map', i); } catch (e) {}
+  sim = null;
+  cam = { x: W / 2, y: 10 * S, z: baseZoom() };
+  draw();
+}
+$('maps').addEventListener('click', e => {
+  if (e.target.dataset.map !== undefined) selectMap(+e.target.dataset.map);
+});
+
 $('mode').addEventListener('click', e => {
   const m = e.target.dataset.mode;
   if (!m) return;
@@ -377,11 +450,11 @@ function draw() {
 
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   ctx.shadowColor = '#19e6ff'; ctx.shadowBlur = 12 * dpr;
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
   for (const pl of polylines) {
     ctx.beginPath();
-    pl.forEach(([x, y], i) => i ? ctx.lineTo(x * S, y * S) : ctx.moveTo(x * S, y * S));
-    ctx.stroke();
+    pl.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+    if (pl.diamond) { ctx.fillStyle = '#19e6ff'; ctx.fill(); }
+    else { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke(); }
   }
   ctx.strokeStyle = '#19e6ff'; ctx.lineWidth = 3;
   for (const s of segs) {
@@ -394,15 +467,16 @@ function draw() {
     ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(Math.PI / 4);
     ctx.fillRect(-p[2], -p[2], p[2] * 2, p[2] * 2); ctx.restore();
   }
-  ctx.strokeStyle = '#19e6ff'; ctx.lineWidth = 2.5;
+  ctx.strokeStyle = '#19e6ff';
   for (const o of rotors) {
     const a = o.w * t, hx = Math.cos(a) * o.len / 2, hy = Math.sin(a) * o.len / 2;
+    ctx.lineWidth = o.thick ? 5 : 2.5;
     ctx.beginPath(); ctx.moveTo(o.x - hx, o.y - hy); ctx.lineTo(o.x + hx, o.y + hy); ctx.stroke();
   }
   ctx.shadowBlur = 0;
 
   ctx.strokeStyle = '#ffd84d'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
-  ctx.beginPath(); ctx.moveTo(15.1 * S, GOAL_Y); ctx.lineTo(16 * S, GOAL_Y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(map.goalX[0] * S, GOAL_Y); ctx.lineTo(map.goalX[1] * S, GOAL_Y); ctx.stroke();
   ctx.setLineDash([]);
 
   if (sim) {
@@ -439,7 +513,7 @@ function drawMinimap(dpr, n) {
   ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1 / ms;
   for (const pl of polylines) {
     ctx.beginPath();
-    pl.forEach(([x, y], i) => i ? ctx.lineTo(x * S, y * S) : ctx.moveTo(x * S, y * S));
+    pl.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
     ctx.stroke();
   }
   if (sim) for (const b of sim.balls) {
@@ -465,6 +539,12 @@ function esc(s) {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// 1 at the zone center, 0 at its edge (zone is in map units)
+function zoneIntensity(z, m) {
+  return Math.max(0, 1 - Math.max(Math.abs(m.x / S - z.x) / (z.w / 2), Math.abs(m.y / S - z.y) / (z.h / 2)));
+}
+function inZone(z, m) { return zoneIntensity(z, m) > 0; }
+
 function focusMarble() {
   const live = liveRanked(sim);
   const i = rankIdx - sim.finished.length;
@@ -472,7 +552,7 @@ function focusMarble() {
   const rival = live[i + 1] || live[i - 1];
   if (!target) return null;
   // zoom and slow-motion follow whichever of the two cutoff rivals is nearer the goal (as in the original)
-  const near = m => Math.max(0, 1 - Math.abs(ZOOM_Y - m.y) / ZOOM_R);
+  const near = m => map.zoomZone ? zoneIntensity(map.zoomZone, m) : Math.max(0, 1 - Math.abs(ZOOM_Y - m.y) / ZOOM_R);
   const focus = rival && near(rival) > near(target) ? rival : target;
   const contested = !!rival && sim.finished.length <= rankIdx;
   return { focus, intensity: contested ? near(focus) : 0 };
@@ -508,14 +588,19 @@ function loop(ts) {
   if (f) {
     const live = liveRanked(sim);
     tx = f.focus.x; ty = f.focus.y + (cv.height / bz) * 0.15;
-    tz = bz * (1 + 1.5 * f.intensity);
+    tz = bz * (1 + 3.5 * Math.pow(f.intensity, 0.7));
     const spread = live.length ? live[0].y - live[live.length - 1].y : 0;
     if (f.intensity === 0 && spread < cv.height / bz * 0.5) ty = (live[0].y + live[live.length - 1].y) / 2;
+    const cz = map.cameraZone;
+    if (f.intensity === 0 && cz && inZone(cz, f.focus)) {
+      tx = cz.x * S; ty = cz.y * S;
+      tz = Math.min(cv.width / (cz.w * S), cv.height / (cz.h * S)) * 0.95;
+    }
   }
   tx = Math.max(cv.width / 2 / tz, Math.min(W - cv.width / 2 / tz, tx));
   if (cv.width / tz >= W) tx = W / 2;
-  const k = 0.08;
-  cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; cam.z += (tz - cam.z) * k;
+  const k = 0.1, kz = tz > cam.z ? 0.16 : 0.06;
+  cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; cam.z += (tz - cam.z) * kz;
   draw();
 
   if (resultId !== null && ts - resultAt > 1200) return finish();
@@ -569,7 +654,7 @@ $('start').addEventListener('click', async () => {
     for (let i = 0; i < skip * 240 && decideWinner(sim, rankIdx) === null; i++) stepSim(sim);
     renderRank();
     const f = focusMarble();
-    if (f) cam = { x: f.focus.x, y: f.focus.y, z: baseZoom() * (1 + 1.5 * f.intensity) };
+    if (f) cam = { x: f.focus.x, y: f.focus.y, z: baseZoom() * (1 + 3.5 * Math.pow(f.intensity, 0.7)) };
     $('settings').style.transition = 'none';
   }
   raf = requestAnimationFrame(loop);
@@ -623,9 +708,14 @@ $('adminSave').addEventListener('click', () => {
 });
 
 resize();
-cam = { x: W / 2, y: 10 * S, z: baseZoom() };
-draw();
-if (location.search.includes('autostart')) $('start').click();
+{
+  const q = new URLSearchParams(location.search);
+  let m = 0;
+  try { m = +localStorage.getItem('pinball.map') || 0; } catch (e) {}
+  if (q.has('map')) m = +q.get('map') || 0;
+  selectMap(MAPS[m] ? m : 0);
+  if (q.has('autostart')) $('start').click();
+}
 </script>
 </body>
 </html>
