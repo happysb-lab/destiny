@@ -138,6 +138,7 @@ for (let x = 9.4; x <= 22.8; x += 1.9) {
 const MAPS = [
   {
     title: '행운의 수레바퀴', height: 113, goalY: 111, goalX: [15.1, 16], zoomY: 106.75,
+    bounds: [0, 1],
     polylines: [
       [[9.25, -40], [9.25, 8.5], [2, 19.25], [2, 26], [9.75, 30], [9.75, 33.5], [1.25, 41], [1.25, 53.75],
         [8.25, 58.75], [8.25, 63], [9.25, 64], [8.25, 65], [8.25, 99.25], [15.1, 106.75], [15.1, 113]],
@@ -163,6 +164,13 @@ const MAPS = [
     title: '욕망의 항아리', height: 93, goalY: 91, goalX: [12, 14], zoomY: 92.5,
     // marbles that miss the center exit ride the side conveyors back up; show the whole pot meanwhile
     cameraZone: { x: 13, y: 74, w: 24, h: 28 },
+    // outer walls as y-monotonic chains; marbles are clamped inside them every step
+    bounds: [
+      [[9, -40], [9, 8.5], [2, 15], [6, 61.5], [5, 61.8], [4, 62.4], [3, 63.6], [2, 66.6], [3, 78.6], [4, 84.6],
+        [5, 85.8], [6, 86.4], [8, 87]],
+      [[17, -40], [17, 8.5], [24, 15], [20, 61.5], [21, 61.8], [22, 62.4], [23, 63.6], [24, 66.6], [23, 78.6], [22, 84.6],
+        [21, 85.8], [20, 86.4], [18, 87]],
+    ],
     zoomZone: { x: 13, y: 77, w: 8, h: 10 },
     polylines: [
       [[17, -40], [9, -40], [9, 8.5], [2, 15], [6, 61.5]],
@@ -189,7 +197,7 @@ const MAPS = [
   },
 ];
 
-let map, H, GOAL_Y, ZOOM_Y, polylines, segs, pegs, rotors;
+let map, H, GOAL_Y, ZOOM_Y, polylines, segs, pegs, rotors, bounds;
 const ZOOM_R = 5 * S;
 
 function loadMap(i) {
@@ -208,8 +216,18 @@ function loadMap(i) {
     const a = b.rot * Math.PI / 180, hx = Math.cos(a) * b.len / 2 * S, hy = Math.sin(a) * b.len / 2 * S;
     pushSeg(b.x * S - hx, b.y * S - hy, b.x * S + hx, b.y * S + hy, 0.3);
   }
+  bounds = map.bounds.map(ch => (typeof ch === 'number' ? map.polylines[ch] : ch).map(([x, y]) => [x * S, y * S]));
   pegs = map.pegs.map(([x, y, r, e]) => [x * S, y * S, r, e]);
   rotors = map.rotors.map(o => ({ x: o.x * S, y: o.y * S, len: o.len * S, w: o.w, mu: o.mu || 0, thick: !!o.thick }));
+}
+// x of a y-monotonic chain at height y, or null outside its range
+function chainX(ch, y) {
+  if (y < ch[0][1] || y > ch[ch.length - 1][1]) return null;
+  for (let i = 1; i < ch.length; i++) {
+    const [x0, y0] = ch[i - 1], [x1, y1] = ch[i];
+    if (y <= y1) return y1 === y0 ? Math.max(x0, x1) : x0 + (x1 - x0) * (y - y0) / (y1 - y0);
+  }
+  return null;
 }
 function pushSeg(ax, ay, bx, by, e) {
   segs.push({ ax, ay, bx, by, e,
@@ -247,7 +265,7 @@ function createSim(count, seed, bias) {
     g: G * (1 + (bias[id] || 0)),
     still: 0, done: false,
   }));
-  return { balls, rand, step: 0, finished: [], result: null, respawns: 0 };
+  return { balls, rand, step: 0, finished: [], result: null, respawns: 0, clamps: 0 };
 }
 
 function bounce(b, nx, ny, pen, svx, svy, e, mu) {
@@ -304,6 +322,9 @@ function stepSim(sim) {
       if (b.x < s.minX || b.x > s.maxX || b.y < s.minY || b.y > s.maxY) continue;
       segHit(b, s.ax, s.ay, s.bx, s.by, null, s.e);
     }
+    const xl = chainX(bounds[0], b.y), xr = chainX(bounds[1], b.y);
+    if (xl !== null && b.x < xl + MR * 0.5) { b.x = xl + MR; if (b.vx < 0) b.vx *= -0.3; sim.clamps++; }
+    if (xr !== null && b.x > xr - MR * 0.5) { b.x = xr - MR; if (b.vx > 0) b.vx *= -0.3; sim.clamps++; }
     if (b.x < 1.5 * S || b.x > 24.5 * S || b.y > H + 10 * S) { b.x = 13 * S; b.y = 5 * S; b.vx = 0; b.vy = 0; sim.respawns++; }
     // watchdog: shake a marble that sits still (original does this after 5s)
     if (Math.abs(b.vx) + Math.abs(b.vy) < 6) {
@@ -555,11 +576,10 @@ function focusMarble() {
   const target = live[Math.max(0, Math.min(live.length - 1, i))];
   const rival = live[i + 1] || live[i - 1];
   if (!target) return null;
-  // zoom and slow-motion follow whichever of the two cutoff rivals is nearer the goal (as in the original)
+  // the camera stays on the cutoff marble; slow-motion kicks in when either rival nears the goal
   const near = m => map.zoomZone ? zoneIntensity(map.zoomZone, m) : Math.max(0, 1 - Math.abs(ZOOM_Y - m.y) / ZOOM_R);
-  const focus = rival && near(rival) > near(target) ? rival : target;
   const contested = !!rival && sim.finished.length <= rankIdx;
-  return { focus, intensity: contested ? near(focus) : 0 };
+  return { focus: target, intensity: contested ? Math.max(near(target), near(rival)) : 0 };
 }
 
 let shot = null;
@@ -568,8 +588,8 @@ function pickShot(live, ts) {
   const roll = Math.random();
   let type, m, zoom;
   if (live.length < 2 || roll < 0.25) { type = 'group'; }
-  else if (roll < 0.5) { type = 'leader'; m = live[0]; zoom = 2; }
-  else if (roll < 0.65) { type = 'target'; m = live[i]; zoom = 2.2; }
+  else if (roll < 0.4) { type = 'leader'; m = live[0]; zoom = 2; }
+  else if (roll < 0.7) { type = 'target'; m = live[i]; zoom = 2.2; }
   else if (roll < 0.8) { type = 'tail'; m = live[live.length - 1]; zoom = 2.4; }
   else { type = 'random'; m = live[Math.floor(Math.random() * live.length)]; zoom = 2.8; }
   if (m && shot && shot.m === m && live.length > 1) m = live[(live.indexOf(m) + 1) % live.length];
@@ -603,7 +623,11 @@ function loop(ts) {
 
   const bz = baseZoom();
   let tz = bz, tx = W / 2, ty = cam.y;
-  if (f && f.intensity > 0) {
+  if (resultId !== null) {
+    // decided: hold on the winner, no more cuts
+    const wb = sim.balls[resultId];
+    if (!wb.done) { tx = wb.x; ty = wb.y; tz = bz * 3; } else { tx = cam.x; ty = cam.y; tz = cam.z; }
+  } else if (f && f.intensity > 0) {
     // finish duel: zoom hard onto the cutoff marble
     tz = bz * (1 + 2.5 * Math.pow(f.intensity, 0.7));
     tx = f.focus.x; ty = f.focus.y - (cv.height / tz) * 0.2;
